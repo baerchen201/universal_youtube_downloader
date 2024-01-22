@@ -4,6 +4,7 @@ import threading
 from http.server import BaseHTTPRequestHandler
 
 import pytube
+import pytube.exceptions
 
 
 class YoutubeDownloadHandler(BaseHTTPRequestHandler):
@@ -27,31 +28,50 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
                 pass
 
     def do_GET(self):
-        if re.fullmatch(r"/0(?:/.*)?", self.path):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write("Help text here".encode())
-            return
-        regex = re.fullmatch(r"/(?:(1-9)/)?([A-Za-z\d_-]{11})", self.path)
+        regex = re.match(r"/([A-Za-z0-9-_]{11})/(\d{,2})", self.path)
         if not regex:
             self.send_response(400)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(
-                f"Invalid request, url does not follow expected format.\n"
-                f"Usage: /[<action>/]<video-id>\n/0 for additional help".encode()
-            )
+            self.wfile.write(f'Bad url formatting, "/<video-id>/<stream-id>'.encode())
             return
-        if len(regex.groups()) == 1:
-            video_id = regex.group(1)
-            action = 1
-        else:
-            action, video_id = regex.groups()
+
+        video_id = regex.group(1)
+        stream_id = regex.group(2)
+
+        video = pytube.YouTube("/" + video_id)
+        _ = None
+        streams = None
         try:
-            video = pytube.YouTube("/" + video_id)
-        except:
-            pass
+            _ = video.title
+            streams = video.streams
+        except pytube.exceptions.VideoPrivate:
+            self.send_response(403)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write("Video is private".encode())
+        except pytube.exceptions.VideoRegionBlocked:
+            self.send_response(502)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write("Video unavailable in the region of the server".encode())
+        except pytube.exceptions.VideoUnavailable:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write("Video can not be accessed".encode())
+        if not _:
+            return
+        if not streams:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write("The video did not return any download links".encode())
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(video.title.encode())
 
 
 if __name__ == "__main__":

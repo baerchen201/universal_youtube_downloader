@@ -1,6 +1,9 @@
+import re
 import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler
+
+import pytube
 
 
 class YoutubeDownloadHandler(BaseHTTPRequestHandler):
@@ -24,7 +27,31 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
                 pass
 
     def do_GET(self):
-        pass
+        if re.fullmatch(r"/0(?:/.*)?", self.path):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write("Help text here".encode())
+            return
+        regex = re.fullmatch(r"/(?:(1-9)/)?([A-Za-z\d_-]{11})", self.path)
+        if not regex:
+            self.send_response(400)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(
+                f"Invalid request, url does not follow expected format.\n"
+                f"Usage: /[<action>/]<video-id>\n/0 for additional help".encode()
+            )
+            return
+        if len(regex.groups()) == 1:
+            video_id = regex.group(1)
+            action = 1
+        else:
+            action, video_id = regex.groups()
+        try:
+            video = pytube.YouTube("/" + video_id)
+        except:
+            pass
 
 
 if __name__ == "__main__":

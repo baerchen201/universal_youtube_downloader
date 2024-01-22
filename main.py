@@ -1,6 +1,8 @@
+import http.client
 import re
 import socketserver
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler
 
 import pytube
@@ -37,11 +39,11 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
             return
 
         video_id = regex.group(1)
-        stream_id = regex.group(2)
+        stream_id = int(regex.group(2))
 
         video = pytube.YouTube("/" + video_id)
         _ = None
-        streams = None
+        streams: pytube.StreamQuery | None = None
         try:
             _ = video.title
             streams = video.streams
@@ -68,10 +70,31 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write("The video did not return any download links".encode())
             return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.end_headers()
-        self.wfile.write(video.title.encode())
+        if len(streams) <= stream_id:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write("The requested stream id is out of range".encode())
+            return
+        else:
+            stream: pytube.Stream = streams[stream_id]
+            url = stream.url
+            head = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+            }
+            ggl_conn: http.client.HTTPResponse = urllib.request.urlopen(urllib.request.Request(url, headers=head))
+            if ggl_conn.getcode() not in (200, 206):
+                self.send_response(502)
+                for header, content in ggl_conn.getheaders():
+                    self.send_header(header, content)
+                self.end_headers()
+                self.wfile.write("Non-success status code".encode())
+                self.send_response(ggl_conn.getcode())
+                for header, content in ggl_conn.getheaders():
+                    self.send_header(header, content)
+                self.end_headers()
+                self.wfile.write(ggl_conn.read(4096))
+                return
 
 
 if __name__ == "__main__":

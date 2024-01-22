@@ -2,6 +2,7 @@ import http.client
 import re
 import socketserver
 import threading
+import traceback
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
@@ -16,6 +17,7 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
         except ConnectionAbortedError:
             pass
         except BaseException as e:
+            print("".join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__)))
             try:
                 self.send_response(500)
                 self.send_header("Content-Type", "text/plain")
@@ -29,13 +31,13 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
             except:
                 pass
 
-    def do_GET(self):
+    def do_GET(self, send_content: bool = True):
         regex = re.match(r"/([A-Za-z0-9-_]{11})/(\d{,2})", self.path)
         if not regex:
             self.send_response(400)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(f'Bad url formatting, "/<video-id>/<stream-id>'.encode())
+            if send_content: self.wfile.write(f'Bad url formatting, "/<video-id>/<stream-id>'.encode())
             return
 
         video_id = regex.group(1)
@@ -51,30 +53,31 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
             self.send_response(403)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(f"Video is private ({video_id})".encode())
+            if send_content: self.wfile.write(f"Video is private ({video_id})".encode())
         except pytube.exceptions.VideoRegionBlocked:
             self.send_response(502)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(f"Video unavailable in the region of the server ({video_id})".encode())
+            if send_content: self.wfile.write(f"Video unavailable in the region of the server ({video_id})".encode())
         except pytube.exceptions.VideoUnavailable:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(f"Video can not be accessed ({video_id})".encode())
+            if send_content: self.wfile.write(f"Video can not be accessed ({video_id})".encode())
         if not _:
             return
         if not streams:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write("The video did not return any download links".encode())
+            if send_content: self.wfile.write("The video did not return any download links".encode())
             return
         if len(streams) <= stream_id:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(f"The requested stream id is out of range, only {len(streams)} streams available".encode())
+            if send_content: self.wfile.write(
+                f"The requested stream id is out of range, only {len(streams)} streams available".encode())
             return
         else:
             stream: pytube.Stream = streams[stream_id]
@@ -89,29 +92,30 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
                 for header in ggl_conn.getheaders():
                     self.send_header(*header)
                 self.end_headers()
-                self.wfile.write("Non-success status code".encode())
+                if send_content: self.wfile.write("Non-success status code".encode())
                 self.send_response(ggl_conn.getcode())
                 for header in ggl_conn.getheaders():
                     self.send_header(*header)
                 self.end_headers()
-                self.wfile.write(ggl_conn.read(4096))
+                if send_content: self.wfile.write(ggl_conn.read(4096))
                 return
             else:
                 self.send_response(ggl_conn.getcode())
                 for header in ggl_conn.getheaders():
-                    if header[0] == "Content-Type":
-                        self.send_header("Content-Type", stream.mime_type)
-                        continue
-                    elif header[0] == "Content-Disposition":
-                        self.send_header("Content-Disposition", f"attachment;filename={stream.default_filename}")
+                    if header[0] in ("Content-Type", "Content-Disposition"):
                         continue
                     self.send_header(*header)
+                self.send_header("Content-Type", stream.mime_type)
+                self.send_header("Content-Disposition", f"attachment;filename={stream.default_filename}")
                 self.end_headers()
-                while 1:
+                while send_content:
                     chunk = ggl_conn.read(4096)
                     if not chunk:
                         break
                     self.wfile.write(chunk)
+
+    def do_HEAD(self):
+        self.do_GET(False)
 
 
 if __name__ == "__main__":

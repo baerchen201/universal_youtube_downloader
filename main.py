@@ -17,7 +17,7 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
                 self.wfile.write(
                     f"The server experienced an unexpected error while processing your request.\nPlease report this on "
                     f"our GitHub issues page and try again later.\n"
-                    f"https://github.com/baerchen201/testProject_learning_git/issues/new\n"
+                    f"https://github.com/baerchen201/universal_youtube_downloader/issues/new\n"
                     f"{type(e).__name__}: {str(e)}".encode()
                 )
             except:

@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler
 
 import pytube
 import pytube.exceptions
+import telebot
 
 
 class YoutubeDownloadHandler(BaseHTTPRequestHandler):
@@ -37,7 +38,8 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
             self.send_response(400)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            if send_content: self.wfile.write(f'Bad url formatting, "/<video-id>/<stream-id>'.encode())
+            if send_content:
+                self.wfile.write(f'Bad url formatting, "/<video-id>/<stream-id>'.encode())
             return
 
         video_id = regex.group(1)
@@ -53,31 +55,37 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
             self.send_response(403)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            if send_content: self.wfile.write(f"Video is private ({video_id})".encode())
+            if send_content:
+                self.wfile.write(f"Video is private ({video_id})".encode())
         except pytube.exceptions.VideoRegionBlocked:
             self.send_response(502)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            if send_content: self.wfile.write(f"Video unavailable in the region of the server ({video_id})".encode())
+            if send_content:
+                self.wfile.write(f"Video unavailable in the region of the server ({video_id})".encode())
         except pytube.exceptions.VideoUnavailable:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            if send_content: self.wfile.write(f"Video can not be accessed ({video_id})".encode())
+            if send_content:
+                self.wfile.write(f"Video can not be accessed ({video_id})".encode())
         if not _:
             return
         if not streams:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            if send_content: self.wfile.write("The video did not return any download links".encode())
+            if send_content:
+                self.wfile.write("The video did not return any download links".encode())
             return
         if len(streams) <= stream_id:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            if send_content: self.wfile.write(
-                f"The requested stream id is out of range, only {len(streams)} streams available".encode())
+            if send_content:
+                self.wfile.write(
+                    f"The requested stream id is out of range, only {len(streams)} streams available".encode()
+                )
             return
         else:
             stream: pytube.Stream = streams[stream_id]
@@ -92,12 +100,14 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
                 for header in ggl_conn.getheaders():
                     self.send_header(*header)
                 self.end_headers()
-                if send_content: self.wfile.write("Non-success status code".encode())
+                if send_content:
+                    self.wfile.write("Non-success status code".encode())
                 self.send_response(ggl_conn.getcode())
                 for header in ggl_conn.getheaders():
                     self.send_header(*header)
                 self.end_headers()
-                if send_content: self.wfile.write(ggl_conn.read(4096))
+                if send_content:
+                    self.wfile.write(ggl_conn.read(4096))
                 return
             else:
                 self.send_response(ggl_conn.getcode())
@@ -116,6 +126,81 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         self.do_GET(False)
+
+
+telegram_bot = telebot.TeleBot("")
+
+
+@telegram_bot.message_handler()
+def handle_message(msg):
+    regex = re.fullmatch(r"[\s\S]*(?:/|v=)([A-Za-z0-9-_]{11})[\s\S]*|([A-Za-z0-9-_]{11})", msg.text)
+    if not regex:
+        telegram_bot.reply_to(msg, "Invalid url")
+        return
+    video_id = regex.group(1)
+
+    video = pytube.YouTube("/" + video_id)
+    _ = None
+    streams: pytube.StreamQuery | None = None
+    try:
+        _ = video.title
+        streams = video.streams
+    except pytube.exceptions.VideoPrivate:
+        telegram_bot.reply_to(msg, f"Video is private ({video_id})")
+    except pytube.exceptions.VideoRegionBlocked:
+        telegram_bot.reply_to(msg, f"Video unavailable in the region of the server ({video_id})")
+    except pytube.exceptions.VideoUnavailable:
+        telegram_bot.reply_to(msg, f"Video can not be accessed ({video_id})")
+    if not _:
+        return
+
+    video_streams, audio_streams = [], []
+    stream: pytube.Stream
+    for stream in streams:
+        if stream.type == "audio":
+            audio_streams.append(stream)
+        else:
+            video_streams.append(stream)
+
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    video_streams.sort(key=lambda i: int(i.resolution.split("p")[0]))
+    for stream in video_streams:
+        btn = telebot.types.InlineKeyboardButton(
+            f"{stream.mime_type} {stream.resolution} {stream.abr if stream.abr is not None else str(stream.bitrate / 1024 / 1024) + 'MB/s'}",
+            callback_data="/" + video_id + "/" + streams.index(stream),
+        )
+        keyboard.add(btn)
+
+    telegram_bot.reply_to(msg, "Please select a download option:", reply_markup=keyboard)
+
+
+@telegram_bot.callback_query_handler(func=lambda call: True)
+def callback_query(ctx: telebot.types.CallbackQuery):
+    regex = re.match(r"/([A-Za-z0-9-_]{11})/(\d{,2})", ctx.data)
+    video_id, stream_id = regex.groups()
+    if video_id is None or stream_id is None:
+        telegram_bot.edit_message_text(
+            "Invalid callback, please try again later", ctx.message.chat.id, ctx.message.id, reply_markup=None
+        )
+        return
+
+    video = pytube.YouTube("/" + video_id)
+    _ = None
+    streams: pytube.StreamQuery | None = None
+    try:
+        _ = video.title
+        streams = video.streams
+    except pytube.exceptions.VideoPrivate:
+        telegram_bot.edit_message_text(f"Video is private ({video_id})", ctx.message.chat.id, ctx.message.id)
+    except pytube.exceptions.VideoRegionBlocked:
+        telegram_bot.edit_message_text(
+            f"Video unavailable in the region of the server ({video_id})", ctx.message.chat.id, ctx.message.id
+        )
+    except pytube.exceptions.VideoUnavailable:
+        telegram_bot.edit_message_text(f"Video can not be accessed ({video_id})", ctx.message.chat.id, ctx.message.id)
+    if not _:
+        return
+    telegram_bot.edit_message_text("Success placeholder", ctx.message.chat.id, ctx.message.id)
 
 
 if __name__ == "__main__":

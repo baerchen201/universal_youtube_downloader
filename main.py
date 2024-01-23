@@ -1,4 +1,5 @@
 import http.client
+import math
 import re
 import socketserver
 import threading
@@ -8,7 +9,10 @@ from http.server import BaseHTTPRequestHandler
 
 import pytube
 import pytube.exceptions
+import requests
 import telebot
+
+import config
 
 
 class YoutubeDownloadHandler(BaseHTTPRequestHandler):
@@ -128,7 +132,7 @@ class YoutubeDownloadHandler(BaseHTTPRequestHandler):
         self.do_GET(False)
 
 
-telegram_bot = telebot.TeleBot("")
+telegram_bot = telebot.TeleBot(config.TELEGRAM_TOKEN)
 
 
 @telegram_bot.message_handler()
@@ -166,8 +170,8 @@ def handle_message(msg):
     video_streams.sort(key=lambda i: int(i.resolution.split("p")[0]))
     for stream in video_streams:
         btn = telebot.types.InlineKeyboardButton(
-            f"{stream.mime_type} {stream.resolution} {stream.abr if stream.abr is not None else str(stream.bitrate / 1024 / 1024) + 'MB/s'}",
-            callback_data="/" + video_id + "/" + streams.index(stream),
+            f"{stream.mime_type} {stream.resolution} {stream.abr if stream.abr is not None else str(math.floor(stream.bitrate / 1024)) + 'kbps'}",
+            callback_data="/" + video_id + "/" + str(streams.index(stream)),
         )
         keyboard.add(btn)
 
@@ -177,7 +181,8 @@ def handle_message(msg):
 @telegram_bot.callback_query_handler(func=lambda call: True)
 def callback_query(ctx: telebot.types.CallbackQuery):
     regex = re.match(r"/([A-Za-z0-9-_]{11})/(\d{,2})", ctx.data)
-    video_id, stream_id = regex.groups()
+    video_id = regex.group(1)
+    stream_id = int(regex.group(2))
     if video_id is None or stream_id is None:
         telegram_bot.edit_message_text(
             "Invalid callback, please try again later", ctx.message.chat.id, ctx.message.id, reply_markup=None
@@ -200,18 +205,51 @@ def callback_query(ctx: telebot.types.CallbackQuery):
         telegram_bot.edit_message_text(f"Video can not be accessed ({video_id})", ctx.message.chat.id, ctx.message.id)
     if not _:
         return
-    telegram_bot.edit_message_text("Success placeholder", ctx.message.chat.id, ctx.message.id)
+
+    if len(streams) <= stream_id:
+        telegram_bot.edit_message_text(
+            f"The requested stream id is out of range, only {len(streams)} streams available",
+            ctx.message.chat.id,
+            ctx.message.id,
+        )
+        return
+
+    telegram_bot.edit_message_text(
+        f"Successfully loaded video {video_id}, sending...", ctx.message.chat.id, ctx.message.id
+    )
+    stream: pytube.Stream = streams[stream_id]
+    url = (
+            "http://"
+            + requests.get("http://ifconfig.me/ip").text
+            + f":8081/{video_id}/{stream_id}/video.{stream.mime_type.split('/')[1]}"
+    )
+    print(url)
+    try:
+        getattr(telegram_bot, f"send_{stream.type}")(ctx.message.chat.id, url)
+    except BaseException as e:
+        telegram_bot.edit_message_text(
+            f"The bot was unable to send the video. You can download the video manually:"
+            f'\n<a href="{url}">{stream.default_filename}</a>',
+            ctx.message.chat.id,
+            ctx.message.id,
+            parse_mode="HTML",
+        )
+        print("".join(traceback.format_exception(type(e), value=e, tb=e.__traceback__)))
 
 
 if __name__ == "__main__":
     server = socketserver.ThreadingTCPServer(("0.0.0.0", 8081), YoutubeDownloadHandler)
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.start()
+    telegram_bot_thread = threading.Thread(target=telegram_bot.infinity_polling())
+    telegram_bot_thread.start()
     try:
         while 1:
             server_thread.join(0.5)
+            telegram_bot_thread.join(0.5)
     except KeyboardInterrupt:
         print("Shutting down server...")
         server.shutdown()
+        telegram_bot.stop_polling()
         server_thread.join()
     print("Server closed")

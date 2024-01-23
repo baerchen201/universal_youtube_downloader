@@ -220,8 +220,8 @@ def callback_query(ctx: telebot.types.CallbackQuery):
     stream: pytube.Stream = streams[stream_id]
     url = (
             "http://"
-            + requests.get("http://ifconfig.me/ip").text
-            + f":8081/{video_id}/{stream_id}/video.{stream.mime_type.split('/')[1]}"
+            + (requests.get("http://ifconfig.me/ip").text if not config.EXT_IP_OVERRIDE else config.EXT_IP_OVERRIDE)
+            + ":"+("8081" if not config.EXT_PORT_OVERRIDE else str(config.EXT_PORT_OVERRIDE))+f"/{video_id}/{stream_id}/video.{stream.mime_type.split('/')[1]}"
     )
     print(url)
     try:

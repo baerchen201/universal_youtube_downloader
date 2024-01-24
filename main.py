@@ -218,11 +218,10 @@ def callback_query(ctx: telebot.types.CallbackQuery):
         f"Successfully loaded video {video_id}, sending...", ctx.message.chat.id, ctx.message.id
     )
     stream: pytube.Stream = streams[stream_id]
-    url = (
-        "http://"
-        + requests.get("http://ifconfig.me/ip").text
-        + f":8081/{video_id}/{stream_id}/video.{stream.mime_type.split('/')[1]}"
-    )
+    if not config.OVERWRITE_VIDEO_RELAY_SERVER:
+        url = "http://" + requests.get("http://ifconfig.me/ip").text + f":8081/{video_id}/{stream_id}"
+    else:
+        url = f"{config.OVERWRITE_VIDEO_RELAY_SERVER}/{video_id}/{stream_id}"
     print(url)
     try:
         getattr(telegram_bot, f"send_{stream.type}")(ctx.message.chat.id, url)

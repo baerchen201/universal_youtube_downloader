@@ -219,9 +219,9 @@ def callback_query(ctx: telebot.types.CallbackQuery):
     )
     stream: pytube.Stream = streams[stream_id]
     url = (
-            "http://"
-            + requests.get("http://ifconfig.me/ip").text
-            + f":8081/{video_id}/{stream_id}/video.{stream.mime_type.split('/')[1]}"
+        "http://"
+        + requests.get("http://ifconfig.me/ip").text
+        + f":8081/{video_id}/{stream_id}/video.{stream.mime_type.split('/')[1]}"
     )
     print(url)
     try:
@@ -241,7 +241,7 @@ if __name__ == "__main__":
     server = socketserver.ThreadingTCPServer(("0.0.0.0", 8081), YoutubeDownloadHandler)
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.start()
-    telegram_bot_thread = threading.Thread(target=telegram_bot.infinity_polling())
+    telegram_bot_thread = threading.Thread(target=lambda bot: bot.infinity_polling(), args=[telegram_bot])
     telegram_bot_thread.start()
     try:
         while 1:

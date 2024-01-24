@@ -1,1 +1,2 @@
 TELEGRAM_TOKEN: str = ""
+OVERWRITE_VIDEO_RELAY_SERVER: str | None = None
